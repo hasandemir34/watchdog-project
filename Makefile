@@ -6,6 +6,7 @@ SRC_DIR = src
 WORKER_DIR = workers
 OBJ_DIR = obj
 
+# Watchdog kaynak ve nesne dosyaları
 SRCS = $(wildcard $(SRC_DIR)/*.c)
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
 
