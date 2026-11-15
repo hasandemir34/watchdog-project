@@ -1,9 +1,12 @@
-# Watchdog – POSIX Process Monitoring System
-#System Programming – Sakarya University  
+# Watchdog: POSIX Signal-Based Process Monitoring System
 
-## Project Description
-A process monitoring and management system developed in C using POSIX system calls on Linux.
+## 1. Proje Amacı ve Mimari
+Bu proje, POSIX sistem çağrılarını kullanarak child process'leri (işçi süreçler) başlatan, izleyen ve sinyaller aracılığıyla yöneten bir "Process Supervision" (Süreç Gözetim) sistemidir. Ana program (`watchdog`), `fork()` ve `exec()` kullanarak alt süreçleri başlatır, `SIGCHLD` ve `waitpid()` ile yaşam döngülerini asenkron olarak takip eder. Beklenmedik şekilde kapanan süreçler için sınırlı (bounded) otomatik yeniden başlatma (restart) mekanizması içerir.
 
+## 2. Kurulum ve Derleme
+Proje Linux/POSIX uyumlu bir ortamda çalışmak üzere tasarlanmıştır. Derlemek için ana dizinde terminal açıp şu komutu girmeniz yeterlidir:
+```bash
+make
 
 ## Team & Responsibilities
 
