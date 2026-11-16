@@ -19,16 +19,16 @@ TARGET = watchdog
 all: dirs $(TARGET) $(WORKER_TARGETS)
 
 dirs:
-@mkdir -p $(OBJ_DIR) logs
+	@mkdir -p $(OBJ_DIR) logs
 
 $(TARGET): $(OBJS)
-$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
-$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 %: $(WORKER_DIR)/%.c
-$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 clean:
-rm -rf $(OBJ_DIR) $(TARGET) $(WORKER_TARGETS) logs/*.log
+	rm -rf $(OBJ_DIR) $(TARGET) $(WORKER_TARGETS) logs/*.log
