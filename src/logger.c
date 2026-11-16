@@ -19,10 +19,14 @@ void log_event(const char *event_description) {
     
     time_t now = time(NULL);
     char *time_str = ctime(&now);
-    time_str[strlen(time_str) - 1] = '\0';
     
-    fprintf(log_file, "[%s] EVENT: %s\n", time_str, event_description);
-    fflush(log_file); 
+    if (time_str != NULL) {
+        time_str[strlen(time_str) - 1] = '\0';
+        fprintf(log_file, "[%s] EVENT: %s\n", time_str, event_description);
+    } else {
+        fprintf(log_file, "[ZAMAN_ALINAMADI] EVENT: %s\n", event_description);
+    }
+    fflush(log_file);
 }
 
 void log_process_status(pid_t pid, const char *status) {
@@ -30,9 +34,13 @@ void log_process_status(pid_t pid, const char *status) {
     
     time_t now = time(NULL);
     char *time_str = ctime(&now);
-    time_str[strlen(time_str) - 1] = '\0';
     
-    fprintf(log_file, "[%s] PROCESS STATUS - PID: %d, State: %s\n", time_str, pid, status);
+    if (time_str != NULL) {
+        time_str[strlen(time_str) - 1] = '\0';
+        fprintf(log_file, "[%s] PROCESS STATUS - PID: %d, State: %s\n", time_str, pid, status);
+    } else {
+        fprintf(log_file, "[ZAMAN_ALINAMADI] PROCESS STATUS - PID: %d, State: %s\n", pid, status);
+    }
     fflush(log_file);
 }
 
