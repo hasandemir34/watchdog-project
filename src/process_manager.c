@@ -200,11 +200,13 @@ int childProcessBaslat(ChildProcess *child, const char *program)
 
 int childProcessIzleVeYenidenBaslat(ChildProcess *child)
 {
-    if (child == NULL || child->program == NULL || child->pid <= 0) { errno = EINVAL; return CHILD_PROCESS_ERROR; }
+    if (child == NULL) { errno = EINVAL; return CHILD_PROCESS_ERROR; }
     if (child->kapatmaIstendi) return CHILD_PROCESS_RUNNING;
+    if (child->program == NULL || child->pid <= 0) { errno = EINVAL; return CHILD_PROCESS_ERROR; }
     int result = childIzleVeYenidenBaslat(&child->pid, child->program, &child->restartCount);
     if (result == CHILD_PROCESS_EXITED || result == CHILD_PROCESS_RESTART_LIMIT) child->aktif = 0;
     else if (result == CHILD_PROCESS_RESTARTED) child->aktif = 1;
+    else if (result == CHILD_PROCESS_ERROR && child->pid <= 0) child->aktif = 0;
     return result;
 }
 
