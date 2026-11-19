@@ -1,14 +1,14 @@
 ﻿#ifndef LOGGER_H
 #define LOGGER_H
 
-#include <sys/types.h>
+typedef enum {
+    LOG_INFO,
+    LOG_WARN,
+    LOG_ERROR
+} LogLevel;
 
-int init_logger(const char *log_file_path);
+int logger_init(const char *log_file_path);
+void logger_close(void);
+int logger_log(LogLevel level, const char *fmt, ...);
 
-void log_event(const char *event_description);
-
-void log_process_status(pid_t pid, const char *status);
-
-void close_logger(void);
-
-#endif /* LOGGER_H */
+#endif
