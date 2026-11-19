@@ -1,41 +1,50 @@
-﻿#!/bin/bash
+﻿#!/usr/bin/env bash
+set -u
 
-echo "======================================"
-echo " Watchdog Test Senaryolari Basliyor "
-echo "======================================"
+WATCHDOG_BIN="./watchdog"
+LOG_FILE="watchdog.log"
 
-# Projeyi derle
-echo "[TEST] Proje derleniyor..."
-make clean && make
-
-if [ ! -f "./watchdog" ]; then
-    echo "[HATA] Derleme basarisiz! watchdog olusturulamadi."
+if [ ! -x "$WATCHDOG_BIN" ]; then
+    echo "[FAIL] watchdog binary not found. Run 'make' first."
     exit 1
 fi
 
-# Watchdog'u arka planda calistir
-echo "[TEST] Watchdog baslatiliyor..."
-./watchdog &
-WATCHDOG_PID=$!
+rm -f "$LOG_FILE"
+
+echo "[INFO] Starting watchdog..."
+"$WATCHDOG_BIN" &
+WD_PID=$!
 sleep 2
 
-# 1. Durum Raporlama Testi (SIGUSR1)
-echo "[TEST] SIGUSR1 sinyali gonderiliyor (Durum Raporu)..."
-kill -SIGUSR1 $WATCHDOG_PID
+# 1. Cocuk surec kontrolu
+CHILDREN=$(pgrep -P "$WD_PID" || true)
+CHILD_COUNT=$(echo "$CHILDREN" | wc -w)
+
+if [ "$CHILD_COUNT" -ge 2 ]; then
+    echo "[PASS] Watchdog (PID $WD_PID) started $CHILD_COUNT child processes."
+else
+    echo "[FAIL] Expected at least 2 child processes, found $CHILD_COUNT."
+fi
+
+# 2. SIGUSR1 durum raporu kontrolu
+echo "[INFO] Sending SIGUSR1 to watchdog..."
+kill -SIGUSR1 "$WD_PID"
 sleep 1
 
-# 2. Beklenmedik Kapanis ve Restart Testi
-# Not: Normalde burada child process PID'si bulup kill atilir.
-# Ozet test mantigi:
-echo "[TEST] Sistemin kendini toparlamasi (Restart) bekleniyor..."
+if [ -f "$LOG_FILE" ] && grep -q "SIGUSR1" "$LOG_FILE"; then
+    echo "[PASS] SIGUSR1 status report written to $LOG_FILE."
+else
+    echo "[FAIL] SIGUSR1 status report not found in $LOG_FILE."
+fi
+
+# 3. SIGTERM ile duzgun kapanis
+echo "[INFO] Sending SIGTERM to watchdog..."
+kill -SIGTERM "$WD_PID"
 sleep 2
 
-# 3. Graceful Shutdown Testi (SIGTERM)
-echo "[TEST] SIGTERM sinyali gonderiliyor (Graceful Shutdown)..."
-kill -SIGTERM $WATCHDOG_PID
-wait $WATCHDOG_PID
-
-echo "======================================"
-echo " Testler Tamamlandi. Log Ciktisi:"
-echo "======================================"
-cat logs/*.log 2>/dev/null || echo "[BILGI] Log dosyasi bulunamadi."
+if ! kill -0 "$WD_PID" 2>/dev/null; then
+    echo "[PASS] Watchdog terminated cleanly on SIGTERM."
+else
+    echo "[FAIL] Watchdog did not terminate on SIGTERM."
+    kill -SIGKILL "$WD_PID" 2>/dev/null || true
+fi
