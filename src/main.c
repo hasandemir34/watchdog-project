@@ -4,14 +4,20 @@
 
 int main(void)
 {
-    sinyalleriKur();
+    if (sinyalleriKur() == -1)
+    {
+        perror("Sinyal kurulumu basarisiz");
+        return 1;
+    }
 
-    printf("Watchdog baslatildi!\n");
+    printf("Watchdog baslatildi! PID: %ld\n", (long)getpid());
 
     while (!kapatmaIstendiMi())
     {
-        printf("Watchdog calisiyor...\n");
-        sleep(2);
+        if (raporIstendiMi())
+            printf("SIGUSR1 alindi: Durum raporu istendi.\n");
+
+        sleep(1);
     }
 
     printf("Watchdog guvenli sekilde kapatildi.\n");
