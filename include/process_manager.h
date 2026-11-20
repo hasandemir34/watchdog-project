@@ -5,6 +5,8 @@
 #include <sys/types.h>
 
 #define CHILD_PROCESS_MAX_RESTARTS 3
+#define CHILD_PROCESS_SHUTDOWN_TIMEOUT_MS 200
+#define CHILD_PROCESS_SHUTDOWN_POLL_INTERVAL_MS 10
 
 enum ChildProcessResult
 {
@@ -35,7 +37,9 @@ typedef struct
    and retries EINTR, so polling does not block while a child is running.
 
    childProcessSonlandir() marks a child as shutting down before signalling
-   it. Subsequent monitoring calls leave it stopped and never restart it. */
+   it. It waits up to CHILD_PROCESS_SHUTDOWN_TIMEOUT_MS, polling every
+   CHILD_PROCESS_SHUTDOWN_POLL_INTERVAL_MS, before escalating to SIGKILL.
+   Subsequent monitoring calls leave it stopped and never restart it. */
 pid_t childBaslat(const char *program);
 int childIzleVeYenidenBaslat(pid_t *pid, const char *program, int *restartCount);
 int childProcessBaslat(ChildProcess *child, const char *program);

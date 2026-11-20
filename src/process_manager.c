@@ -219,12 +219,17 @@ int childProcessSonlandir(ChildProcess *child)
     pid_t pid = child->pid;
     if (kill(pid, SIGTERM) == -1 && errno != ESRCH) return CHILD_PROCESS_ERROR;
     int status; pid_t result;
-    for (int attempt = 0; attempt < 20; ++attempt)
+    const int poll_count = CHILD_PROCESS_SHUTDOWN_TIMEOUT_MS /
+                           CHILD_PROCESS_SHUTDOWN_POLL_INTERVAL_MS;
+    for (int attempt = 0; attempt < poll_count; ++attempt)
     {
         do { result = waitpid(pid, &status, WNOHANG); } while (result == -1 && errno == EINTR);
         if (result == pid || (result == -1 && errno == ECHILD)) goto reaped;
         if (result == -1) return CHILD_PROCESS_ERROR;
-        struct timespec delay = {0, 10000000};
+        struct timespec delay = {
+            0,
+            CHILD_PROCESS_SHUTDOWN_POLL_INTERVAL_MS * 1000000L
+        };
         nanosleep(&delay, NULL);
     }
     if (kill(pid, SIGKILL) == -1 && errno != ESRCH) return CHILD_PROCESS_ERROR;
