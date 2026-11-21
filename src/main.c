@@ -29,6 +29,7 @@ int main(void)
     printf("Watchdog baslatildi! PID: %ld\n", (long)getpid());
     logger_log(LOG_INFO, "Watchdog baslatildi PID=%ld", (long)getpid());
 
+    // Iki worker baslat
     for (int i = 0; i < WORKER_COUNT; i++)
     {
         if (childProcessBaslat(&children[i], "./workers/worker") == CHILD_PROCESS_ERROR)
@@ -48,7 +49,9 @@ int main(void)
                    i + 1, (long)children[i].pid);
     }
 
+    // Her saniye SIGALRM uret
     struct itimerval timer = {0};
+
     timer.it_value.tv_sec = 1;
     timer.it_interval.tv_sec = 1;
 
@@ -64,51 +67,63 @@ int main(void)
 
     int hata = 0;
 
+    // Ana kontrol dongusu
     while (!kapatmaIstendiMi())
     {
         if (kontrolIstendiMi() && !kapatmaIstendiMi())
         {
-            int oncekiRestart[WORKER_COUNT];
-            int oncekiAktif[WORKER_COUNT];
-
+            // Her worker'i ayri kontrol et
             for (int i = 0; i < WORKER_COUNT; i++)
             {
-                oncekiRestart[i] = children[i].restartCount;
-                oncekiAktif[i] = children[i].aktif;
-            }
+                if (!children[i].aktif)
+                    continue;
 
-            int sonuc = childProcessleriIzle(children, WORKER_COUNT);
+                pid_t eskiPid = children[i].pid;
 
-            if (sonuc == CHILD_PROCESS_ERROR)
-            {
-                perror("Worker izleme hatasi");
-                logger_log(LOG_ERROR, "Worker izleme hatasi");
-                hata = 1;
-                break;
-            }
+                int sonuc = childProcessIzleVeYenidenBaslat(&children[i]);
 
-            for (int i = 0; i < WORKER_COUNT; i++)
-            {
-                if (children[i].restartCount > oncekiRestart[i])
+                if (sonuc == CHILD_PROCESS_ERROR)
+                {
+                    perror("Worker izleme hatasi");
+                    logger_log(LOG_ERROR,
+                               "Worker %d izleme hatasi", i + 1);
+
+                    hata = 1;
+                    break;
+                }
+
+                if (sonuc == CHILD_PROCESS_EXITED)
+                {
+                    logger_log(LOG_INFO,
+                               "Worker %d normal sonlandi PID=%ld",
+                               i + 1, (long)eskiPid);
+                }
+                else if (sonuc == CHILD_PROCESS_RESTARTED)
                 {
                     logger_log(LOG_WARN,
-                               "Worker %d restart %d/%d PID=%ld",
+                               "Worker %d beklenmedik sonlandi PID=%ld",
+                               i + 1, (long)eskiPid);
+
+                    logger_log(LOG_WARN,
+                               "Worker %d restart %d/%d Yeni PID=%ld",
                                i + 1,
                                children[i].restartCount,
                                CHILD_PROCESS_MAX_RESTARTS,
                                (long)children[i].pid);
                 }
-
-                if (oncekiAktif[i] && !children[i].aktif)
+                else if (sonuc == CHILD_PROCESS_RESTART_LIMIT)
                 {
                     logger_log(LOG_WARN,
-                               "Worker %d durdu. Limit=%d",
-                               i + 1,
-                               CHILD_PROCESS_MAX_RESTARTS);
+                               "Worker %d sonlandi PID=%ld. Restart limiti doldu.",
+                               i + 1, (long)eskiPid);
                 }
             }
+
+            if (hata)
+                break;
         }
 
+        // SIGUSR1 durum raporu
         if (raporIstendiMi())
         {
             ProcessStatusSnapshot snapshots[WORKER_COUNT];
@@ -117,8 +132,10 @@ int main(void)
             {
                 snapshots[i].pid = children[i].pid;
                 snapshots[i].name = names[i];
+
                 snapshots[i].state =
                     children[i].aktif ? "RUNNING" : "STOPPED";
+
                 snapshots[i].restart_count = children[i].restartCount;
 
                 printf("Worker %d - PID: %ld - Restart: %d - Durum: %s\n",
@@ -131,13 +148,16 @@ int main(void)
             logger_log_status_report(snapshots, WORKER_COUNT);
         }
 
+        // Kisa araliklarla sinyalleri kontrol et
         struct timespec bekleme = {0, 100000000L};
         nanosleep(&bekleme, NULL);
     }
 
+    // Timer'i durdur
     struct itimerval durdur = {0};
     setitimer(ITIMER_REAL, &durdur, NULL);
 
+    // Worker'lari guvenli kapat
     if (childProcessleriSonlandir(children, WORKER_COUNT) == CHILD_PROCESS_ERROR)
     {
         perror("Worker kapatma hatasi");
