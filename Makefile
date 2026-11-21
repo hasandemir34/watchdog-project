@@ -8,7 +8,7 @@ OBJ_DIR     := build
 SRCS        := $(wildcard $(SRC_DIR)/*.c)
 OBJS        := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 
-.PHONY: all clean
+.PHONY: all clean test
 
 all: $(TARGET) $(WORKER_BIN)
 
@@ -23,6 +23,11 @@ $(OBJ_DIR):
 
 $(WORKER_BIN): workers/worker.c
 	$(CC) $(CFLAGS) -o $@ $<
+
+test: clean all
+	@echo "Running automated watchdog test suite..."
+	chmod +x tests/test_scenarios.sh
+	./tests/test_scenarios.sh
 
 clean:
 	rm -rf $(OBJ_DIR) $(TARGET) $(WORKER_BIN) watchdog.log
