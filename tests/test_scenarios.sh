@@ -25,7 +25,7 @@ trap cleanup EXIT
 
 rm -f "$LOG_FILE"
 
-# 1. Normal calisma ve en az 2 worker kontrolu
+# 1. Normal çalışma ve en az 2 worker kontrolü
 info "Test 1: Starting watchdog and verifying child processes..."
 "$WATCHDOG_BIN" &
 WD_PID=$!
@@ -40,7 +40,7 @@ else
     fail "Expected at least 2 workers, found $CHILD_COUNT."
 fi
 
-# 2. SIGUSR1: Her iki worker PID'sinin logda dogrulanmasi
+# 2. SIGUSR1: Her iki worker PID'sinin logda doğrulanması
 info "Test 2: Sending SIGUSR1 and verifying both worker PIDs in $LOG_FILE..."
 kill -SIGUSR1 "$WD_PID"
 sleep 1
@@ -57,7 +57,7 @@ if [ "$ALL_PIDS_FOUND" -eq 1 ] && [ "$CHILD_COUNT" -ge 2 ]; then
     pass "All worker PIDs ($CHILDREN) verified in SIGUSR1 log."
 fi
 
-# 3. Tam 3 restart denemesi dogrulamasi
+# 3. Tam 3 restart denemesi doğrulaması
 info "Test 3: Verifying exact 3 restart attempts..."
 INITIAL_COUNT=$CHILD_COUNT
 for attempt in 1 2 3 4; do
@@ -80,7 +80,7 @@ else
     fail "Restart limit check failed (restart logs: $RESTART_LOGS, active workers: $CURRENT_COUNT)."
 fi
 
-# 4. SIGTERM shutdown ve child temizligi
+# 4. SIGTERM shutdown ve child temizliği
 info "Test 4: Sending SIGTERM and confirming child termination..."
 BEFORE_TERM=$(pgrep -P "$WD_PID" || true)
 kill -SIGTERM "$WD_PID"
@@ -103,7 +103,7 @@ else
     kill -SIGKILL "$WD_PID" 2>/dev/null || true
 fi
 
-# 5. Otomatik SIGINT shutdown ve child temizligi
+# 5. Otomatik SIGINT shutdown ve child temizliği
 info "Test 5: Testing automated SIGINT shutdown..."
 "$WATCHDOG_BIN" &
 WD_PID=$!
@@ -129,5 +129,47 @@ else
     fail "Watchdog did not terminate on SIGINT."
     kill -SIGKILL "$WD_PID" 2>/dev/null || true
 fi
+
+# 6. SIGTERM timeout ve SIGKILL fallback testi
+info "Test 6: Testing SIGTERM timeout and SIGKILL fallback..."
+"$WATCHDOG_BIN" &
+WD_PID=$!
+sleep 2
+
+FROZEN_CHILD=$(pgrep -P "$WD_PID" | head -n 1 || true)
+if [ -n "$FROZEN_CHILD" ]; then
+    kill -SIGSTOP "$FROZEN_CHILD"
+    kill -SIGTERM "$WD_PID"
+
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        if ! kill -0 "$WD_PID" 2>/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+
+    if ! kill -0 "$WD_PID" 2>/dev/null && ! kill -0 "$FROZEN_CHILD" 2>/dev/null; then
+        pass "Unresponsive worker ($FROZEN_CHILD) terminated via SIGKILL fallback."
+    else
+        fail "SIGTERM timeout / SIGKILL fallback failed for worker $FROZEN_CHILD."
+        kill -SIGKILL "$FROZEN_CHILD" 2>/dev/null || true
+        kill -SIGKILL "$WD_PID" 2>/dev/null || true
+    fi
+else
+    fail "No worker process found for SIGKILL fallback test."
+fi
+
+# 7. Log zaman damgasi kontrolu
+info "Test 7: Verifying timestamp format in $LOG_FILE..."
+if [ -f "$LOG_FILE" ] && grep -qE '^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\]' "$LOG_FILE"; then
+    pass "Log timestamps verified."
+else
+    fail "Log timestamps missing or invalid."
+fi
+
+echo ""
+echo "========================================"
+echo "Test Summary: $PASS_COUNT passed, $FAIL_COUNT failed"
+echo "========================================"
 
 exit "$FAIL_COUNT"
