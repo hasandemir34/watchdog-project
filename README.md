@@ -1,30 +1,68 @@
-# Watchdog – POSIX Process Monitoring System
-#System Programming – Sakarya University  
+# Watchdog Project
 
-## Project Description
-A process monitoring and management system developed in C using POSIX system calls on Linux.
+A simple process monitoring system developed in **C** for the System Programming course at Sakarya University.
 
+## Project Features
 
-## Team & Responsibilities
+- Creates and monitors two worker processes.
+- Automatically restarts failed workers (maximum 3 times).
+- Uses `SIGCHLD` and `SIGALRM` for process monitoring.
+- Uses `SIGUSR1` to display process information.
+- Supports safe shutdown with `SIGINT` and `SIGTERM`.
+- Records events in `watchdog.log`.
 
-### Project Manager – Hasan
-**Signal Management & Main Program**
-- Implement signal handling using `sigaction()`.
-- Handle `SIGINT`, `SIGTERM`, and `SIGUSR1`.
-- Develop the main control loop.
-- Implement graceful shutdown.
-- Coordinate module integration.
+## Team Members
 
-### Elif – Child Process Management
-- Create child processes using `fork()` and `exec()`.
-- Monitor processes using `SIGCHLD` and `waitpid()`.
-- Handle unexpected termination and automatic restart.
-- Implement periodic process checks.
+| Member | Responsibility |
+|---|---|
+| Hasan Demir | Project management, signal handling and main program |
+| Elif Yırtıcı| Child process management |
+| Ahmet Yiğit| Logging and automated tests |
 
-### Ahmet – Logging & Testing
-- Implement event logging with timestamps.
-- Implement process status reporting.
-- Prepare the `Makefile` and test scenarios.
-- Maintain project documentation.
+## Installation
 
+Compile the project:
 
+```bash
+make
+```
+
+Run the program:
+
+```bash
+./watchdog
+```
+
+## Testing
+
+Run all automated tests:
+
+```bash
+make test
+```
+
+**Test Results: 7 passed, 0 failed.**
+
+## Useful Commands
+
+Request process status:
+
+```bash
+kill -USR1 $(pgrep -n -x watchdog)
+```
+
+Stop the Watchdog:
+
+```bash
+kill -TERM $(pgrep -n -x watchdog)
+```
+
+Clean generated files:
+
+```bash
+make clean
+```
+
+## Technologies
+
+C, Linux, POSIX Signals, GCC, Makefile, Git and GitHub.
