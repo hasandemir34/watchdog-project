@@ -2,3 +2,6 @@
 /logs/
 /worker
 /watchdog
+build/
+watchdog.log
+workers/worker
