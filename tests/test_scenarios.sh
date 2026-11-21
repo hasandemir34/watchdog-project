@@ -61,31 +61,39 @@ else
     fi
 fi
 
-# 3. Tam 3 restart denemesi doğrulaması
-info "Test 3: Verifying exact 3 restart attempts..."
-INITIAL_COUNT=$CHILD_COUNT
+# 3. Aynı worker'ı takip ederek tam 3 restart + 4. kapanışta limit kontrolü
+info "Test 3: Tracking a single worker for exact 3 restarts and limit enforcement..."
+INITIAL_COUNT=$(pgrep -P "$WD_PID" | wc -w || true)
+UNTOUCHED_PID=$(pgrep -P "$WD_PID" | head -n 1 || true)
+ACTUAL_RESTARTS=0
+
 for attempt in 1 2 3 4; do
-    TARGET_CHILD=$(pgrep -P "$WD_PID" | head -n 1 || true)
+    TARGET_CHILD=$(pgrep -P "$WD_PID" | grep -v "^${UNTOUCHED_PID}$" | head -n 1 || true)
     if [ -z "$TARGET_CHILD" ]; then
-        info "No active worker left at attempt $attempt."
+        info "Target worker is no longer running at attempt $attempt."
         break
     fi
-    info "Attempt $attempt: Killing worker PID $TARGET_CHILD with SIGKILL"
+
+    info "Attempt $attempt: Killing target worker PID $TARGET_CHILD with SIGKILL"
     kill -SIGKILL "$TARGET_CHILD"
     sleep 2
+
+    NEW_CHILD=$(pgrep -P "$WD_PID" | grep -v "^${UNTOUCHED_PID}$" | head -n 1 || true)
+    if [ -n "$NEW_CHILD" ] && [ "$NEW_CHILD" != "$TARGET_CHILD" ]; then
+        ACTUAL_RESTARTS=$((ACTUAL_RESTARTS + 1))
+        info "Target worker restarted with new PID $NEW_CHILD (restart #$ACTUAL_RESTARTS)"
+    else
+        info "Target worker did not restart after attempt $attempt."
+    fi
 done
 
-if [ ! -f "$LOG_FILE" ]; then
-    fail "Log file $LOG_FILE not found for restart verification."
-else
-    RESTART_LOGS=$(grep -ci "restart" "$LOG_FILE" || true)
-    CURRENT_COUNT=$(pgrep -P "$WD_PID" | wc -w || true)
+CURRENT_COUNT=$(pgrep -P "$WD_PID" | wc -w || true)
+EXPECTED_COUNT=$((INITIAL_COUNT - 1))
 
-    if [ "$RESTART_LOGS" -eq 3 ] && [ "$CURRENT_COUNT" -lt "$INITIAL_COUNT" ]; then
-        pass "Exactly 3 restart attempts verified and limit enforced."
-    else
-        fail "Restart limit check failed (restart logs: $RESTART_LOGS, active workers: $CURRENT_COUNT)."
-    fi
+if [ "$ACTUAL_RESTARTS" -eq 3 ] && [ "$CURRENT_COUNT" -eq "$EXPECTED_COUNT" ]; then
+    pass "Same worker restarted exactly 3 times and stopped after 4th termination (active workers: $CURRENT_COUNT)."
+else
+    fail "Restart limit check failed (actual restarts: $ACTUAL_RESTARTS, active workers: $CURRENT_COUNT, expected: $EXPECTED_COUNT)."
 fi
 
 # 4. SIGTERM shutdown ve child temizliği
