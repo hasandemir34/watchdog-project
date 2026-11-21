@@ -45,16 +45,20 @@ info "Test 2: Sending SIGUSR1 and verifying both worker PIDs in $LOG_FILE..."
 kill -SIGUSR1 "$WD_PID"
 sleep 1
 
-ALL_PIDS_FOUND=1
-for cpid in $CHILDREN; do
-    if ! grep -q "$cpid" "$LOG_FILE"; then
-        fail "Worker PID $cpid not found in SIGUSR1 log."
-        ALL_PIDS_FOUND=0
-    fi
-done
+if [ ! -f "$LOG_FILE" ]; then
+    fail "Log file $LOG_FILE was not created after SIGUSR1."
+else
+    ALL_PIDS_FOUND=1
+    for cpid in $CHILDREN; do
+        if ! grep -q "$cpid" "$LOG_FILE"; then
+            fail "Worker PID $cpid not found in SIGUSR1 log."
+            ALL_PIDS_FOUND=0
+        fi
+    done
 
-if [ "$ALL_PIDS_FOUND" -eq 1 ] && [ "$CHILD_COUNT" -ge 2 ]; then
-    pass "All worker PIDs ($CHILDREN) verified in SIGUSR1 log."
+    if [ "$ALL_PIDS_FOUND" -eq 1 ] && [ "$CHILD_COUNT" -ge 2 ]; then
+        pass "All worker PIDs ($CHILDREN) verified in SIGUSR1 log."
+    fi
 fi
 
 # 3. Tam 3 restart denemesi doğrulaması
@@ -71,13 +75,17 @@ for attempt in 1 2 3 4; do
     sleep 2
 done
 
-RESTART_LOGS=$(grep -ci "restart" "$LOG_FILE" || true)
-CURRENT_COUNT=$(pgrep -P "$WD_PID" | wc -w || true)
-
-if [ "$RESTART_LOGS" -eq 3 ] && [ "$CURRENT_COUNT" -lt "$INITIAL_COUNT" ]; then
-    pass "Exactly 3 restart attempts verified and limit enforced."
+if [ ! -f "$LOG_FILE" ]; then
+    fail "Log file $LOG_FILE not found for restart verification."
 else
-    fail "Restart limit check failed (restart logs: $RESTART_LOGS, active workers: $CURRENT_COUNT)."
+    RESTART_LOGS=$(grep -ci "restart" "$LOG_FILE" || true)
+    CURRENT_COUNT=$(pgrep -P "$WD_PID" | wc -w || true)
+
+    if [ "$RESTART_LOGS" -eq 3 ] && [ "$CURRENT_COUNT" -lt "$INITIAL_COUNT" ]; then
+        pass "Exactly 3 restart attempts verified and limit enforced."
+    else
+        fail "Restart limit check failed (restart logs: $RESTART_LOGS, active workers: $CURRENT_COUNT)."
+    fi
 fi
 
 # 4. SIGTERM shutdown ve child temizliği
@@ -159,7 +167,7 @@ else
     fail "No worker process found for SIGKILL fallback test."
 fi
 
-# 7. Log zaman damgasi kontrolu
+# 7. Log zaman damgası kontrolü
 info "Test 7: Verifying timestamp format in $LOG_FILE..."
 if [ -f "$LOG_FILE" ] && grep -qE '^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\]' "$LOG_FILE"; then
     pass "Log timestamps verified."
