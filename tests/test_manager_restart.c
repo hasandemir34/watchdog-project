@@ -1,5 +1,7 @@
+#include <errno.h>
 #include <stdio.h>
 #include <signal.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/wait.h>
 
@@ -33,7 +35,21 @@ int main(void)
                 return 1;
 
             if (result == 0)
-                usleep(100000);
+            {
+                struct timespec delay = {0, 100000000};
+                struct timespec remaining;
+
+                while (nanosleep(&delay, &remaining) == -1)
+                {
+                    if (errno != EINTR)
+                    {
+                        perror("nanosleep");
+                        return 1;
+                    }
+
+                    delay = remaining;
+                }
+            }
         }
     }
 
