@@ -4,5 +4,6 @@
 int sinyalleriKur(void);
 int kapatmaIstendiMi(void);
 int raporIstendiMi(void);
+int kontrolIstendiMi(void);
 
 #endif
