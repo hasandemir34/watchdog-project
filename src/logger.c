@@ -98,3 +98,25 @@ int logger_log(LogLevel level, const char *fmt, ...) {
 
     return write_all(g_log_fd, final_line, write_len);
 }
+int logger_log_status_report(const ProcessStatusSnapshot *procs, size_t count) {
+    if (g_log_fd < 0) {
+        return -1;
+    }
+
+    if (logger_log(LOG_STATUS, "=== PROCESS STATUS REPORT (SIGUSR1) ===") < 0) {
+        return -1;
+    }
+
+    if (procs == NULL || count == 0) {
+        logger_log(LOG_STATUS, "No active child processes tracked.");
+    } else {
+        for (size_t i = 0; i < count; i++) {
+            const char *name = procs[i].name ? procs[i].name : "unnamed";
+            const char *state = procs[i].state ? procs[i].state : "UNKNOWN";
+            logger_log(LOG_STATUS, "Child #%zu | Name: %s | PID: %d | State: %s | Restarts: %d",
+                       i + 1, name, (int)procs[i].pid, state, procs[i].restart_count);
+        }
+    }
+
+    return logger_log(LOG_STATUS, "=== END OF STATUS REPORT ===");
+}
