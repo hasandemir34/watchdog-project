@@ -21,6 +21,7 @@ typedef struct
 {
     pid_t pid;
     const char *program;
+    const char *const *arguments;
     int restartCount;
     int aktif;
     int kapatmaIstendi;
@@ -41,8 +42,11 @@ typedef struct
    CHILD_PROCESS_SHUTDOWN_POLL_INTERVAL_MS, before escalating to SIGKILL.
    Subsequent monitoring calls leave it stopped and never restart it. */
 pid_t childBaslat(const char *program);
+pid_t childBaslatAvecArguments(const char *program, const char *const arguments[]);
 int childIzleVeYenidenBaslat(pid_t *pid, const char *program, int *restartCount);
 int childProcessBaslat(ChildProcess *child, const char *program);
+int childProcessBaslatAvecArguments(ChildProcess *child, const char *program,
+                                    const char *const arguments[]);
 int childProcessIzleVeYenidenBaslat(ChildProcess *child);
 int childProcessSonlandir(ChildProcess *child);
 int childProcessleriIzle(ChildProcess *children, size_t count);
