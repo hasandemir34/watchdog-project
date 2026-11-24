@@ -2,9 +2,11 @@
 set -u
 
 WATCHDOG_BIN="./watchdog"
+WORKER_BIN="./workers/worker"
 LOG_FILE="watchdog.log"
 PASS_COUNT=0
 FAIL_COUNT=0
+TEST_TMP_DIR=""
 
 pass() { echo "[PASS] $1"; PASS_COUNT=$((PASS_COUNT + 1)); }
 fail() { echo "[FAIL] $1"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
@@ -20,13 +22,70 @@ cleanup() {
         pkill -SIGKILL -P "$WD_PID" 2>/dev/null || true
         kill -SIGKILL "$WD_PID" 2>/dev/null || true
     fi
+    if [ -n "$TEST_TMP_DIR" ]; then
+        rm -rf "$TEST_TMP_DIR"
+    fi
 }
 trap cleanup EXIT
 
 rm -f "$LOG_FILE"
 
-# 1. Normal çalışma ve en az 2 worker kontrolü
-info "Test 1: Starting watchdog and verifying child processes..."
+# 1. Normal worker termination must be reported without a restart.
+info "Test 1: Verifying normal worker termination and no restart..."
+TEST_TMP_DIR=$(mktemp -d)
+if ${CC:-gcc} -std=c11 -Wall -Wextra -Wpedantic -Werror \
+    -D_POSIX_C_SOURCE=200809L -Iinclude -x c - src/process_manager.c \
+    -o "$TEST_TMP_DIR/normal_exit_test" <<'EOF'
+#include <stdio.h>
+#include <time.h>
+#include "process_manager.h"
+
+int main(int argc, char *argv[])
+{
+    const char *arguments[4];
+    ChildProcess child = {0};
+    int result;
+
+    if (argc != 2)
+        return 1;
+
+    arguments[0] = argv[1];
+    arguments[1] = "--exit-after";
+    arguments[2] = "1";
+    arguments[3] = NULL;
+
+    if (childProcessBaslatAvecArguments(&child, argv[1], arguments) != 0)
+        return 1;
+
+    do
+    {
+        struct timespec delay = {0, 100000000L};
+        nanosleep(&delay, NULL);
+        result = childProcessIzleVeYenidenBaslat(&child);
+    } while (result == CHILD_PROCESS_RUNNING);
+
+    if (result != CHILD_PROCESS_EXITED || child.restartCount != 0 ||
+        child.aktif != 0 || child.pid != -1)
+    {
+        childProcessSonlandir(&child);
+        return 2;
+    }
+
+    return 0;
+}
+EOF
+then
+    if "$TEST_TMP_DIR/normal_exit_test" "$WORKER_BIN"; then
+        pass "Worker exited with status 0 and was not restarted."
+    else
+        fail "Normal worker termination was not handled as expected."
+    fi
+else
+    fail "Could not compile the normal termination test harness."
+fi
+
+# 2. Normal çalışma ve en az 2 worker kontrolü
+info "Test 2: Starting watchdog and verifying child processes..."
 "$WATCHDOG_BIN" &
 WD_PID=$!
 sleep 2
@@ -40,8 +99,8 @@ else
     fail "Expected at least 2 workers, found $CHILD_COUNT."
 fi
 
-# 2. SIGUSR1: Her iki worker PID'sinin logda doğrulanması
-info "Test 2: Sending SIGUSR1 and verifying both worker PIDs in $LOG_FILE..."
+# 3. SIGUSR1: Her iki worker PID'sinin logda doğrulanması
+info "Test 3: Sending SIGUSR1 and verifying both worker PIDs in $LOG_FILE..."
 kill -SIGUSR1 "$WD_PID"
 sleep 1
 
@@ -61,8 +120,8 @@ else
     fi
 fi
 
-# 3. Aynı worker'ı takip ederek tam 3 restart + 4. kapanışta limit kontrolü
-info "Test 3: Tracking a single worker for exact 3 restarts and limit enforcement..."
+# 4. Aynı worker'ı takip ederek tam 3 restart + 4. kapanışta limit kontrolü
+info "Test 4: Tracking a single worker for exact 3 restarts and limit enforcement..."
 INITIAL_COUNT=$(pgrep -P "$WD_PID" | wc -w || true)
 UNTOUCHED_PID=$(pgrep -P "$WD_PID" | head -n 1 || true)
 ACTUAL_RESTARTS=0
@@ -96,8 +155,8 @@ else
     fail "Restart limit check failed (actual restarts: $ACTUAL_RESTARTS, active workers: $CURRENT_COUNT, expected: $EXPECTED_COUNT)."
 fi
 
-# 4. SIGTERM shutdown ve child temizliği
-info "Test 4: Sending SIGTERM and confirming child termination..."
+# 5. SIGTERM shutdown ve child temizliği
+info "Test 5: Sending SIGTERM and confirming child termination..."
 BEFORE_TERM=$(pgrep -P "$WD_PID" || true)
 kill -SIGTERM "$WD_PID"
 sleep 2
@@ -119,8 +178,8 @@ else
     kill -SIGKILL "$WD_PID" 2>/dev/null || true
 fi
 
-# 5. Otomatik SIGINT shutdown ve child temizliği
-info "Test 5: Testing automated SIGINT shutdown..."
+# 6. Otomatik SIGINT shutdown ve child temizliği
+info "Test 6: Testing automated SIGINT shutdown..."
 "$WATCHDOG_BIN" &
 WD_PID=$!
 sleep 2
@@ -146,8 +205,8 @@ else
     kill -SIGKILL "$WD_PID" 2>/dev/null || true
 fi
 
-# 6. SIGTERM timeout ve SIGKILL fallback testi
-info "Test 6: Testing SIGTERM timeout and SIGKILL fallback..."
+# 7. SIGTERM timeout ve SIGKILL fallback testi
+info "Test 7: Testing SIGTERM timeout and SIGKILL fallback..."
 "$WATCHDOG_BIN" &
 WD_PID=$!
 sleep 2
@@ -175,8 +234,8 @@ else
     fail "No worker process found for SIGKILL fallback test."
 fi
 
-# 7. Log zaman damgası kontrolü
-info "Test 7: Verifying timestamp format in $LOG_FILE..."
+# 8. Log zaman damgası kontrolü
+info "Test 8: Verifying timestamp format in $LOG_FILE..."
 if [ -f "$LOG_FILE" ] && grep -qE '^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\]' "$LOG_FILE"; then
     pass "Log timestamps verified."
 else
