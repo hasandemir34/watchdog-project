@@ -11,6 +11,16 @@ TEST_TMP_DIR=""
 pass() { echo "[PASS] $1"; PASS_COUNT=$((PASS_COUNT + 1)); }
 fail() { echo "[FAIL] $1"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 info() { echo "[INFO] $1"; }
+assert_log() {
+    local description=$1
+    local pattern=$2
+
+    if grep -Eq -- "$pattern" "$LOG_FILE"; then
+        pass "$description"
+    else
+        fail "$description"
+    fi
+}
 
 if [ ! -x "$WATCHDOG_BIN" ]; then
     echo "[FAIL] watchdog binary not found. Run 'make' first."
@@ -34,19 +44,21 @@ rm -f "$LOG_FILE"
 info "Test 1: Verifying normal worker termination and no restart..."
 TEST_TMP_DIR=$(mktemp -d)
 if ${CC:-gcc} -std=c11 -Wall -Wextra -Wpedantic -Werror \
-    -D_POSIX_C_SOURCE=200809L -Iinclude -x c - src/process_manager.c \
+    -D_POSIX_C_SOURCE=200809L -Iinclude -x c - src/process_manager.c src/logger.c \
     -o "$TEST_TMP_DIR/normal_exit_test" <<'EOF'
 #include <stdio.h>
 #include <time.h>
 #include "process_manager.h"
+#include "logger.h"
 
 int main(int argc, char *argv[])
 {
     const char *arguments[4];
     ChildProcess child = {0};
+    pid_t old_pid;
     int result;
 
-    if (argc != 2)
+    if (argc != 3 || logger_init(argv[2]) == -1)
         return 1;
 
     arguments[0] = argv[1];
@@ -55,7 +67,12 @@ int main(int argc, char *argv[])
     arguments[3] = NULL;
 
     if (childProcessBaslatAvecArguments(&child, argv[1], arguments) != 0)
+    {
+        logger_close();
         return 1;
+    }
+
+    old_pid = child.pid;
 
     do
     {
@@ -64,19 +81,26 @@ int main(int argc, char *argv[])
         result = childProcessIzleVeYenidenBaslat(&child);
     } while (result == CHILD_PROCESS_RUNNING);
 
-    if (result != CHILD_PROCESS_EXITED || child.restartCount != 0 ||
-        child.aktif != 0 || child.pid != -1)
+    if (result == CHILD_PROCESS_EXITED && child.restartCount == 0 &&
+        child.aktif == 0 && child.pid == -1)
     {
-        childProcessSonlandir(&child);
-        return 2;
+        logger_log(LOG_INFO, "Worker 1 normal sonlandi PID=%ld", (long)old_pid);
+        logger_close();
+        return 0;
     }
 
-    return 0;
+    if (child.aktif)
+        childProcessSonlandir(&child);
+    logger_close();
+
+    return 2;
 }
 EOF
 then
-    if "$TEST_TMP_DIR/normal_exit_test" "$WORKER_BIN"; then
-        pass "Worker exited with status 0 and was not restarted."
+    NORMAL_LOG="$TEST_TMP_DIR/normal.log"
+    if "$TEST_TMP_DIR/normal_exit_test" "$WORKER_BIN" "$NORMAL_LOG" && \
+        grep -Eq '^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\] \[INFO\] Worker 1 normal sonlandi PID=[0-9]+$' "$NORMAL_LOG"; then
+        pass "Worker exited with status 0, was not restarted, and normal termination was logged."
     else
         fail "Normal worker termination was not handled as expected."
     fi
@@ -97,6 +121,12 @@ if [ "$CHILD_COUNT" -ge 2 ]; then
     pass "Watchdog (PID $WD_PID) spawned $CHILD_COUNT workers: $CHILDREN"
 else
     fail "Expected at least 2 workers, found $CHILD_COUNT."
+fi
+assert_log "Watchdog startup was logged." 'Watchdog baslatildi PID=[0-9]+'
+if [ "$(grep -Ec 'Worker [12] baslatildi PID=[0-9]+' "$LOG_FILE")" -ge 2 ]; then
+    pass "Both child process creations were logged."
+else
+    fail "Both child process creations were not logged."
 fi
 
 # 3. SIGUSR1: Her iki worker PID'sinin logda doğrulanması
@@ -119,6 +149,13 @@ else
         pass "All worker PIDs ($CHILDREN) verified in SIGUSR1 log."
     fi
 fi
+assert_log "SIGUSR1 status report header was logged." '=== PROCESS STATUS REPORT \(SIGUSR1\) ==='
+if [ "$(grep -Ec 'Child #[12] \| Name: worker-[12] \| PID: [0-9]+ \| State: RUNNING \| Restarts: 0' "$LOG_FILE")" -ge 2 ]; then
+    pass "SIGUSR1 status entries were logged."
+else
+    fail "SIGUSR1 status entries were not logged."
+fi
+assert_log "SIGUSR1 status report footer was logged." '=== END OF STATUS REPORT ==='
 
 # 4. Aynı worker'ı takip ederek tam 3 restart + 4. kapanışta limit kontrolü
 info "Test 4: Tracking a single worker for exact 3 restarts and limit enforcement..."
@@ -154,6 +191,13 @@ if [ "$ACTUAL_RESTARTS" -eq 3 ] && [ "$CURRENT_COUNT" -eq "$EXPECTED_COUNT" ]; t
 else
     fail "Restart limit check failed (actual restarts: $ACTUAL_RESTARTS, active workers: $CURRENT_COUNT, expected: $EXPECTED_COUNT)."
 fi
+assert_log "Unexpected worker termination was logged." 'Worker [12] beklenmedik sonlandi PID=[0-9]+'
+if [ "$(grep -Ec 'Worker [12] restart [1-3]/3 Yeni PID=[0-9]+' "$LOG_FILE")" -ge 3 ]; then
+    pass "Worker restart events were logged."
+else
+    fail "Worker restart events were not logged."
+fi
+assert_log "Maximum restart limit was logged." 'Restart limiti doldu\.'
 
 # 5. SIGTERM shutdown ve child temizliği
 info "Test 5: Sending SIGTERM and confirming child termination..."
@@ -177,6 +221,7 @@ else
     fail "Watchdog did not terminate on SIGTERM."
     kill -SIGKILL "$WD_PID" 2>/dev/null || true
 fi
+assert_log "Graceful shutdown was logged." 'Watchdog guvenli sekilde kapatildi$'
 
 # 6. Otomatik SIGINT shutdown ve child temizliği
 info "Test 6: Testing automated SIGINT shutdown..."
@@ -234,12 +279,12 @@ else
     fail "No worker process found for SIGKILL fallback test."
 fi
 
-# 8. Log zaman damgası kontrolü
+# 8. Log timestamp and level format control
 info "Test 8: Verifying timestamp format in $LOG_FILE..."
-if [ -f "$LOG_FILE" ] && grep -qE '^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\]' "$LOG_FILE"; then
-    pass "Log timestamps verified."
+if [ -s "$LOG_FILE" ] && awk 'NF && $0 !~ /^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\] \[(INFO|WARN|ERROR|STATUS)\] / { exit 1 }' "$LOG_FILE"; then
+    pass "All log records have the expected timestamp and level format."
 else
-    fail "Log timestamps missing or invalid."
+    fail "Log timestamp or level format is missing or invalid."
 fi
 
 echo ""
