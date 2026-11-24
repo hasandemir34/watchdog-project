@@ -26,6 +26,20 @@ static int wait_for_child(pid_t pid, int *status)
     return result == pid ? 0 : -1;
 }
 
+static int sleep_for_interval(struct timespec interval)
+{
+    struct timespec remaining;
+
+    while (nanosleep(&interval, &remaining) == -1)
+    {
+        if (errno != EINTR)
+            return -1;
+        interval = remaining;
+    }
+
+    return 0;
+}
+
 static int report_exec_error(int fd, int error_number)
 {
     const char *data = (const char *)&error_number;
@@ -260,7 +274,8 @@ int childProcessSonlandir(ChildProcess *child)
             0,
             CHILD_PROCESS_SHUTDOWN_POLL_INTERVAL_MS * 1000000L
         };
-        nanosleep(&delay, NULL);
+        if (sleep_for_interval(delay) == -1)
+            return CHILD_PROCESS_ERROR;
     }
     if (kill(pid, SIGKILL) == -1 && errno != ESRCH) return CHILD_PROCESS_ERROR;
     do { result = waitpid(pid, &status, 0); } while (result == -1 && errno == EINTR);

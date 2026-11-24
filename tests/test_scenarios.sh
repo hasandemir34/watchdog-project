@@ -211,6 +211,9 @@ if ! kill -0 "$WD_PID" 2>/dev/null; then
         if kill -0 "$cpid" 2>/dev/null; then
             STILL_ALIVE=1
         fi
+        if ps -o stat= -p "$cpid" 2>/dev/null | grep -q '^Z'; then
+            STILL_ALIVE=1
+        fi
     done
     if [ "$STILL_ALIVE" -eq 0 ]; then
         pass "Watchdog and all children terminated cleanly after SIGTERM."
@@ -237,6 +240,9 @@ if ! kill -0 "$WD_PID" 2>/dev/null; then
     STILL_ALIVE=0
     for cpid in $BEFORE_INT; do
         if kill -0 "$cpid" 2>/dev/null; then
+            STILL_ALIVE=1
+        fi
+        if ps -o stat= -p "$cpid" 2>/dev/null | grep -q '^Z'; then
             STILL_ALIVE=1
         fi
     done
@@ -268,7 +274,9 @@ if [ -n "$FROZEN_CHILD" ]; then
         sleep 1
     done
 
-    if ! kill -0 "$WD_PID" 2>/dev/null && ! kill -0 "$FROZEN_CHILD" 2>/dev/null; then
+    if ! kill -0 "$WD_PID" 2>/dev/null && \
+        ! kill -0 "$FROZEN_CHILD" 2>/dev/null && \
+        ! ps -o stat= -p "$FROZEN_CHILD" 2>/dev/null | grep -q '^Z'; then
         pass "Unresponsive worker ($FROZEN_CHILD) terminated via SIGKILL fallback."
     else
         fail "SIGTERM timeout / SIGKILL fallback failed for worker $FROZEN_CHILD."

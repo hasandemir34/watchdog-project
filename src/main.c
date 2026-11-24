@@ -75,6 +75,9 @@ int main(void)
             // Her worker'i ayri kontrol et
             for (int i = 0; i < WORKER_COUNT; i++)
             {
+                if (kapatmaIstendiMi())
+                    break;
+
                 if (!children[i].aktif)
                     continue;
 
