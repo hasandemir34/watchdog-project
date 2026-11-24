@@ -1,90 +1,52 @@
 # Watchdog — POSIX Process Monitoring System
 
-A process monitoring and recovery system developed in **C** using POSIX system calls and Linux signals.
+Watchdog, Linux/POSIX ortamında çalışan ve child worker süreçlerini izleyen bir C uygulamasıdır. Uygulama iki worker başlatır, periyodik olarak durumlarını kontrol eder, beklenmedik sonlanmaları yeniden başlatır ve sinyal tabanlı durum raporu ile güvenli kapanma sağlar.
 
 **Sakarya University | Software Engineering | System Programming | 2026–2027**
 
-## 📌 Project Overview
+## Proje amacı ve mimari
 
-Watchdog is a process supervision application that creates, monitors, and manages child processes.
+Ana program (`src/main.c`) iki worker sürecini başlatır ve kontrol döngüsünü yürütür. Her worker `fork()` sonrasında `exec()` ile `workers/worker` executable’ına dönüştürülür. Parent process child PID’lerini `ChildProcess` yapılarında tutar.
 
-The main application starts two worker processes and continuously monitors their execution. If a worker terminates unexpectedly, Watchdog automatically restarts it up to **3 times**.
-
-The system also supports signal-based process control, status reporting, event logging, and graceful shutdown.
-
-## ⚙️ Features
-
-- **Process Management:** Creates two child processes using `fork()` and `exec()`.
-- **Process Monitoring:** Detects terminated processes using `SIGCHLD` and `waitpid()`.
-- **Automatic Restart:** Restarts unexpectedly terminated workers up to 3 times per worker.
-- **Periodic Monitoring:** Uses `SIGALRM` and `setitimer()` to periodically check processes.
-- **Status Reporting:** Uses `SIGUSR1` to report worker PIDs, states, and restart counts.
-- **Graceful Shutdown:** Handles `SIGINT` and `SIGTERM` to terminate child processes safely.
-- **Forced Termination:** Uses `SIGKILL` if a worker does not terminate within the timeout.
-- **Event Logging:** Records process events with timestamps in `watchdog.log`.
-
-## 🏗️ Project Structure
+Mimari akış:
 
 ```text
-watchdog-project/
-├── include/
-│   ├── signal_manager.h
-│   ├── process_manager.h
-│   └── logger.h
-├── src/
-│   ├── main.c
-│   ├── signal_manager.c
-│   ├── process_manager.c
-│   └── logger.c
-├── workers/
-│   └── worker.c
-├── tests/
-│   └── test_scenarios.sh
-├── Makefile
-└── README.md
+main.c
+  ├─ signal_manager.c  → SIGINT, SIGTERM, SIGUSR1, SIGCHLD, SIGALRM flag’leri
+  ├─ process_manager.c → fork/exec, waitpid, restart ve shutdown/reap işlemleri
+  └─ logger.c          → timestamp’li watchdog.log kayıtları
+       └─ workers/worker → izlenen worker executable’ı
 ```
 
-### Module Responsibilities
-
-| Module | Description |
+| Modül | Sorumluluk |
 |---|---|
-| `main.c` | Main control loop and module integration |
-| `signal_manager.c` | POSIX signal handling |
-| `process_manager.c` | Child creation, monitoring, restart, and termination |
-| `logger.c` | Timestamped event logging and status reports |
-| `worker.c` | Worker process executable |
-| `test_scenarios.sh` | Automated verification of system functionality |
+| `src/main.c` | Ana döngü, worker kurulumu, signal flag’lerinin işlenmesi ve logger entegrasyonu |
+| `src/signal_manager.c` | Signal handler’ları yalnızca güvenli flag güncellemeleri yapar |
+| `src/process_manager.c` | Child oluşturma, `waitpid()`, beklenmedik sonlanma, restart ve shutdown |
+| `src/logger.c` | Timestamp’li INFO/WARN/ERROR/STATUS kayıtları ve SIGUSR1 raporu |
+| `workers/worker.c` | Worker process executable’ı ve normal sonlanma test modu |
+| `tests/test_scenarios.sh` | Build sonrası uçtan uca otomatik test senaryoları |
 
-## 🚀 Installation & Usage
+## Gereksinimler
 
-### Requirements
-
-- Linux
-- GCC Compiler
+- Linux veya POSIX uyumlu bir ortam
+- GCC veya uyumlu C derleyicisi
 - GNU Make
+- Bash ve standart process araçları (`pgrep`, `ps`, `kill`, `awk`)
 
-### 1. Clone the Repository
+## Derleme ve çalıştırma
 
-```bash
-git clone https://github.com/hasandemir34/watchdog-project.git
-cd watchdog-project
-```
-
-### 2. Compile
+Repository kök dizininden:
 
 ```bash
+make clean
 make
-```
-
-### 3. Run
-
-```bash
 ./watchdog
 ```
 
-The application automatically starts two worker processes.
+`make`, `watchdog` binary’sini ve `workers/worker` executable’ını üretir. Watchdog başlarken iki worker oluşturur.
 
-Example output:
+Örnek terminal çıktısı:
 
 ```text
 Watchdog baslatildi! PID: 12695
@@ -92,111 +54,134 @@ Worker 1 baslatildi! PID: 12696
 Worker 2 baslatildi! PID: 12697
 ```
 
-## 🧪 Testing the System
-
-### Check Running Workers
-
-Open a second terminal:
+Programı çalıştıran terminalde `Ctrl+C` SIGINT gönderir. Ayrı bir terminalden çalışan Watchdog’un PID’si bulunarak SIGTERM veya SIGUSR1 gönderilebilir:
 
 ```bash
-pgrep -a -P $(pgrep -n -x watchdog)
+WATCHDOG_PID=$(pgrep -n -x watchdog)
+kill -SIGUSR1 "$WATCHDOG_PID"
+kill -SIGTERM "$WATCHDOG_PID"
 ```
 
-### Test Automatic Restart
+## Worker yaşam döngüsü
 
-Terminate a worker using its actual PID:
+### Başlatma ve izleme
+
+Parent process her worker için `fork()` çağırır. Child process `exec()` ile `./workers/worker` programını çalıştırır. Process manager exec hatalarını pipe üzerinden parent’a bildirir.
+
+`SIGCHLD` ve periyodik `SIGALRM` aynı kontrol flag’ini set eder. Ana döngü bu flag’i işlediğinde `waitpid(..., WNOHANG)` ile child durumunu kontrol eder; `EINTR` durumunda ilgili sistem çağrıları yeniden denenir.
+
+Periyodik kontrol `setitimer()` ile yaklaşık her saniye tetiklenir. Signal handler’ları process manager veya logger çağırmaz; yalnızca `sig_atomic_t` flag’lerini günceller.
+
+### Normal ve beklenmedik sonlanma
+
+- Exit status `0` normal sonlanma kabul edilir ve worker yeniden başlatılmaz.
+- Nonzero exit status veya signal ile sonlanma beklenmedik kabul edilir.
+- Beklenmedik sonlanma sonrasında aynı worker için en fazla **3 otomatik restart** yapılır.
+- Dördüncü beklenmedik sonlanmada restart limiti uygulanır ve worker yeniden başlatılmaz.
+
+Worker’ın normal sonlanma test modu:
 
 ```bash
-kill -SIGKILL <WORKER_PID>
+./workers/worker --exit-after 1
 ```
 
-Watchdog detects the termination and starts a replacement process.
+Bu seçenek worker’ın yaklaşık bir saniye bekleyip exit status `0` ile çıkmasını sağlar. Argüman verilmezse worker’ın varsayılan davranışı değişmez ve süreç çalışmaya devam eder. Watchdog’un normal sonlanma ve restart davranışı otomatik test harness’i tarafından process manager API’si üzerinden doğrulanır; ana program varsayılan olarak sürekli çalışan worker’lar başlatır.
 
-Each worker has a maximum of **3 restart attempts**.
+## Sinyaller ve kapanma
 
-### Request a Status Report
+- **SIGINT:** Kullanıcı tarafından istenen kapanmayı işaretler.
+- **SIGTERM:** Watchdog’un güvenli kapanmasını işaretler.
+- **SIGUSR1:** Worker PID, state ve restart count bilgilerini `watchdog.log` içine STATUS kayıtları olarak yazar.
+- **SIGCHLD:** Child sonlanması sonrasında kontrol flag’ini set eder.
+- **SIGALRM:** `setitimer()` tarafından periyodik kontrol için üretilir.
 
-```bash
-kill -SIGUSR1 $(pgrep -n -x watchdog)
+SIGINT veya SIGTERM istendiğinde ana döngü yeni child kontrolü/restart işlemlerini durdurur ve aktif child’ları kapatmaya geçer. Her child için process manager:
+
+1. `SIGTERM` gönderir.
+2. En fazla 200 ms boyunca 10 ms aralıklarla `waitpid(..., WNOHANG)` ile bekler.
+3. Child hâlâ çalışıyorsa `SIGKILL` gönderir.
+4. Blocking `waitpid()` ile child’ı reap eder ve zombie bırakmadan temizler.
+
+`ESRCH` (process artık yok) ve `ECHILD` (child zaten reaped edilmiş) durumları shutdown akışında beklenen sonlanma durumları olarak ele alınır. Bir child kapanmaya dirençli olsa bile diğer child’lar için cleanup devam eder.
+
+## Logging
+
+Log dosyası çalışma dizininde `watchdog.log` olarak oluşturulur ve append modunda yazılır. Her kayıt şu formattadır:
+
+```text
+[YYYY-MM-DD HH:MM:SS] [LEVEL] mesaj
 ```
 
-The application displays process information and records it in `watchdog.log`.
+Kaydedilen olaylar arasında şunlar bulunur:
 
-### Graceful Shutdown
+- Watchdog startup
+- Worker creation
+- Normal child termination
+- Beklenmedik child termination
+- Restart attempt ve yeni PID
+- Restart limitinin dolması
+- SIGUSR1 status report başlangıcı, child satırları ve bitişi
+- Graceful shutdown
 
-Press `Ctrl+C` in the Watchdog terminal or execute:
+Gerçek uygulama mesajlarına örnek:
 
-```bash
-kill -SIGTERM $(pgrep -n -x watchdog)
+```text
+[2026-11-24 16:10:21] [INFO] Watchdog baslatildi PID=12695
+[2026-11-24 16:10:21] [INFO] Worker 1 baslatildi PID=12696
+[2026-11-24 16:10:24] [WARN] Worker 2 beklenmedik sonlandi PID=12697
+[2026-11-24 16:10:24] [WARN] Worker 2 restart 1/3 Yeni PID=12701
+[2026-11-24 16:10:32] [WARN] Worker 2 sonlandi PID=12703. Restart limiti doldu.
+[2026-11-24 16:10:35] [STATUS] === PROCESS STATUS REPORT (SIGUSR1) ===
+[2026-11-24 16:10:40] [INFO] Watchdog guvenli sekilde kapatildi
 ```
 
-Watchdog terminates its remaining child processes before exiting.
+## Otomatik testler
 
-## 📊 Automated Tests
-
-Run the complete test suite:
+Tam test akışını çalıştırmak için:
 
 ```bash
 make test
 ```
 
-The automated test suite verifies:
+Alternatif olarak binary’ler zaten derlenmişse:
 
-| Test | Result |
-|---|---|
-| Creation of two worker processes | ✅ PASS |
-| SIGUSR1 status reporting | ✅ PASS |
-| Automatic restart and restart limit | ✅ PASS |
-| SIGTERM graceful shutdown | ✅ PASS |
-| SIGINT graceful shutdown | ✅ PASS |
-| SIGKILL fallback | ✅ PASS |
-| Log timestamp verification | ✅ PASS |
-
-**Final Test Result: 7 Passed, 0 Failed**
-
-Normal worker termination was also verified manually.
-
-## 📝 Logging
-
-The system records important events in `watchdog.log`, including:
-
-- Process creation and termination
-- Automatic restart attempts
-- Restart limit enforcement
-- SIGUSR1 status reports
-- Application shutdown
-
-Example:
-
-```text
-[2026-11-21 17:57:21] [INFO] Watchdog baslatildi PID=21790
-[2026-11-21 17:57:21] [INFO] Worker 1 baslatildi PID=21792
-[2026-11-21 17:57:24] [WARN] Worker 2 restart 1/3 PID=21869
-[2026-11-21 17:57:32] [INFO] Watchdog guvenli sekilde kapatildi
+```bash
+bash -n tests/test_scenarios.sh
+bash tests/test_scenarios.sh
 ```
 
-## 👥 Team & Contributions
+Test script’i şu davranışları doğrular:
 
-| Team Member | Responsibilities |
-|---|---|
-| **Hasan Demir** | Project management, signal handling, main program, and integration |
-| **Elif** | Child process management, process monitoring, and automatic restart |
-| **Ahmet** | Logging system, Makefile, and automated testing |
+- İki worker oluşturulması
+- Worker’ın `--exit-after` ile exit status `0` vererek normal sonlanması
+- Normal sonlanmada restart yapılmaması
+- SIGUSR1 status report kayıtları
+- Beklenmedik termination sonrası restart
+- Aynı worker için tam 3 restart ve limit sonrası durma
+- SIGTERM ve SIGINT ile graceful shutdown
+- Yanıt vermeyen worker için SIGKILL fallback
+- Child’ların reaped edilmesi ve zombie bırakılmaması
+- Log event mesajları ile timestamp/level formatı
 
-The project was developed collaboratively using Git and GitHub. Individual contributions can be reviewed through the repository's commit history.
+Son doğrulamada test script’i **17 başarılı, 0 başarısız** assertion üretmiştir. Testler dinamik PID’ler kullanır; sabit PID veya makineye özel mutlak yol kullanmaz.
 
-## 🧹 Cleanup
+## Temizlik
 
-To remove generated files:
+Üretilen binary, object dosyaları ve log dosyasını kaldırmak için:
 
 ```bash
 make clean
 ```
 
-## 📚 Technologies
+## Teslim notu
 
-**C · Linux · POSIX · GCC · GNU Make · Bash · Git · GitHub**
+Repository içinde ayrıca assignment report veya submission template dosyası bulunmamaktadır. Harici bir ders raporu isteniyorsa önerilen kısa yapı şudur:
 
----
+1. Amaç ve gereksinimler
+2. Mimari ve kullanılan POSIX çağrıları
+3. Signal ve process lifecycle tasarımı
+4. Restart ve graceful shutdown davranışı
+5. Logging ve test sonuçları
+6. Sınırlamalar ve ekip katkıları
 
-**Sakarya University — System Programming Term Project 1**
+**Technologies:** C · Linux · POSIX · GCC · GNU Make · Bash · Git · GitHub
