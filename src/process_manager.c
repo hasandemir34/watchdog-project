@@ -52,7 +52,8 @@ static int report_exec_error(int fd, int error_number)
     return remaining == 0 ? 0 : -1;
 }
 
-pid_t childBaslat(const char *program)
+static pid_t childBaslatAvecArgumentsInternal(const char *program,
+                                              const char *const arguments[])
 {
     if (program == NULL || *program == '\0')
     {
@@ -92,7 +93,10 @@ pid_t childBaslat(const char *program)
     if (pid == 0)
     {
         close(exec_status[0]);
-        execl(program, program, (char *)NULL);
+        if (arguments == NULL)
+            execl(program, program, (char *)NULL);
+        else
+            execv(program, (char *const *)arguments);
 
         int exec_errno = errno;
         (void)report_exec_error(exec_status[1], exec_errno);
@@ -150,7 +154,19 @@ pid_t childBaslat(const char *program)
     return pid;
 }
 
-int childIzleVeYenidenBaslat(pid_t *pid, const char *program, int *restartCount)
+pid_t childBaslat(const char *program)
+{
+    return childBaslatAvecArgumentsInternal(program, NULL);
+}
+
+pid_t childBaslatAvecArguments(const char *program, const char *const arguments[])
+{
+    return childBaslatAvecArgumentsInternal(program, arguments);
+}
+
+static int childIzleVeYenidenBaslatAvecArguments(pid_t *pid, const char *program,
+                                                 const char *const arguments[],
+                                                 int *restartCount)
 {
     if (pid == NULL || program == NULL || restartCount == NULL || *pid <= 0 || *restartCount < 0)
     { errno = EINVAL; return CHILD_PROCESS_ERROR; }
@@ -185,17 +201,30 @@ int childIzleVeYenidenBaslat(pid_t *pid, const char *program, int *restartCount)
 
     ++*restartCount;
     printf("Restarting worker... Attempt %d/%d\n", *restartCount, CHILD_PROCESS_MAX_RESTARTS);
-    *pid = childBaslat(program);
+    *pid = childBaslatAvecArgumentsInternal(program, arguments);
     return *pid == -1 ? CHILD_PROCESS_ERROR : CHILD_PROCESS_RESTARTED;
+}
+
+int childIzleVeYenidenBaslat(pid_t *pid, const char *program, int *restartCount)
+{
+    return childIzleVeYenidenBaslatAvecArguments(pid, program, NULL, restartCount);
+}
+
+int childProcessBaslatAvecArguments(ChildProcess *child, const char *program,
+                                    const char *const arguments[])
+{
+    if (child == NULL || program == NULL || *program == '\0') { errno = EINVAL; return CHILD_PROCESS_ERROR; }
+    if (child->aktif && child->pid > 0) { errno = EALREADY; return CHILD_PROCESS_ERROR; }
+    child->pid = -1; child->program = program; child->arguments = arguments;
+    child->restartCount = 0; child->kapatmaIstendi = 0;
+    child->pid = childBaslatAvecArgumentsInternal(program, arguments);
+    child->aktif = child->pid > 0;
+    return child->aktif ? 0 : CHILD_PROCESS_ERROR;
 }
 
 int childProcessBaslat(ChildProcess *child, const char *program)
 {
-    if (child == NULL || program == NULL || *program == '\0') { errno = EINVAL; return CHILD_PROCESS_ERROR; }
-    if (child->aktif && child->pid > 0) { errno = EALREADY; return CHILD_PROCESS_ERROR; }
-    child->pid = -1; child->program = program; child->restartCount = 0; child->kapatmaIstendi = 0;
-    child->pid = childBaslat(program); child->aktif = child->pid > 0;
-    return child->aktif ? 0 : CHILD_PROCESS_ERROR;
+    return childProcessBaslatAvecArguments(child, program, NULL);
 }
 
 int childProcessIzleVeYenidenBaslat(ChildProcess *child)
@@ -203,7 +232,8 @@ int childProcessIzleVeYenidenBaslat(ChildProcess *child)
     if (child == NULL) { errno = EINVAL; return CHILD_PROCESS_ERROR; }
     if (child->kapatmaIstendi) return CHILD_PROCESS_RUNNING;
     if (child->program == NULL || child->pid <= 0) { errno = EINVAL; return CHILD_PROCESS_ERROR; }
-    int result = childIzleVeYenidenBaslat(&child->pid, child->program, &child->restartCount);
+    int result = childIzleVeYenidenBaslatAvecArguments(
+        &child->pid, child->program, child->arguments, &child->restartCount);
     if (result == CHILD_PROCESS_EXITED || result == CHILD_PROCESS_RESTART_LIMIT) child->aktif = 0;
     else if (result == CHILD_PROCESS_RESTARTED) child->aktif = 1;
     else if (result == CHILD_PROCESS_ERROR && child->pid <= 0) child->aktif = 0;
